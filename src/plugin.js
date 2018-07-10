@@ -62,18 +62,15 @@ class SqsLocalPlugin {
     this.log(`Setting listen @ ${url}`)
     this.sqs.receiveMessage({
       QueueUrl: url,
-      WaitTimeSeconds: 20
+      MessageAttributeNames: ['All'],
+      WaitTimeSeconds: 20 // long poll lol
     }, (err, data) => {
       if (err) return this.log(`Cannot receive messages from ${url}; ${err.toString()}`)
 
       if (data.Messages) {
         this.log(`Received message @ queue ${url}, spinning up respective lambda`)
         cb({
-          Records: [
-            {Sns: {
-              Message: data.Messages[0].Body
-            }}
-          ]
+          Records: data.Messages.map(this.wrapSQSMessage)
         },
         {},
         (err, data) => {
@@ -89,6 +86,10 @@ class SqsLocalPlugin {
 
       this.listenToQueue(url, cb)
     })
+  }
+
+  wrapSQSMessage (rawMessage) {
+    return _.keys(rawMessage).reduce((acc, key) => ({ ...acc, [_.camelCase(key)]: rawMessage[key] }), {})
   }
 
   createHandler(fn) {
