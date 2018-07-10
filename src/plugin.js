@@ -1,4 +1,5 @@
 const _ = require("lodash");
+const { resolve } = require('path')
 
 const SQS_ENDPOINT = process.env.SQS_ENDPOINT || "http://localhost:9324";
 
@@ -16,6 +17,108 @@ class SqsLocalPlugin {
       secretAccessKey: "na",
       region: "eu-west-1"
     });
+
+    const offlineConfig = this.serverless.service.custom["serverless-offline"] || {}
+    this.location = process.cwd()
+    if (offlineConfig.location) {
+        this.location = process.cwd() + "/" + offlineConfig.location
+    } else if (this.serverless.config.servicePath) {
+        this.location = this.serverless.config.servicePath
+    }
+  }
+
+  start () {
+    this.log('Subscribing to SQS endpoints...')
+    this.subscribeAll()
+  }
+
+  subscribeAll () {
+    const fns = Object.keys(this.service.functions)
+      .map(fnName => {
+        const fn = this.service.functions[fnName]
+        return fn.events
+          .filter(event => event.sqs != null)
+          .map(event => ({ fn, event: event.sqs }))
+      })
+      .map(t => t[0])
+      .filter(t => t)
+
+    this.sqs.listQueues({}, (err, qs) => {
+      if (err) this.log(`Failed to list queues ${err.toString()}`)
+
+      qs.QueueUrls.forEach(url => {
+        const queueName = url.substr(url.lastIndexOf('/') + 1)
+
+        fns
+          .filter(({event}) => event.substr(event.lastIndexOf(':') + 1) === queueName)
+          .forEach(({fn}) => {
+            this.listenToQueue(url, this.createHandler(fn))
+          })
+      })
+    })
+  }
+
+  listenToQueue (url, cb) {
+    this.log(`Setting listen @ ${url}`)
+    this.sqs.receiveMessage({
+      QueueUrl: url,
+      WaitTimeSeconds: 20
+    }, (err, data) => {
+      if (err) return this.log(`Cannot receive messages from ${url}; ${err.toString()}`)
+
+      if (data.Messages) {
+        this.log(`Received message @ queue ${url}, spinning up respective lambda`)
+        cb({
+          Records: [
+            {Sns: {
+              Message: data.Messages[0].Body
+            }}
+          ]
+        },
+        {},
+        (err, data) => {
+          if (err) {
+            return this.log(`Lambda terminated with error ${err.toString()}`)
+          }
+          this.log(`Lambda returned data ${data.toString()}`)
+        }
+      )
+      } else {
+        this.log(`There are no new messages @ queue ${url}`)
+      }
+
+      this.listenToQueue(url, cb)
+    })
+  }
+
+  createHandler(fn) {
+
+    // use the main serverless config since this behavior is already supported there
+    if (!this.serverless.config.skipCacheInvalidation || Array.isArray(this.serverless.config.skipCacheInvalidation)) {
+      for (const key in require.cache) {
+
+        // don't invalidate cached modules from node_modules ...
+        if (key.match(/node_modules/)) {
+            continue;
+        }
+
+        // if an array is provided to the serverless config, check the entries there too
+        if (Array.isArray(this.serverless.config.skipCacheInvalidation) &&
+            this.serverless.config.skipCacheInvalidation.find(pattern => new RegExp(pattern).test(key))) {
+            continue;
+        }
+
+        delete require.cache[key];
+      }
+    }
+
+    const handlerFnNameIndex = fn.handler.lastIndexOf(".");
+    const handlerPath = fn.handler.substring(0, handlerFnNameIndex);
+    const handlerFnName = fn.handler.substring(handlerFnNameIndex + 1);
+    const fullHandlerPath = resolve(this.location, handlerPath);
+    this.log(`require(${fullHandlerPath})[${handlerFnName}]`);
+    const handler = require(fullHandlerPath)[handlerFnName];
+    return handler;
   }
 
   getCommands() {
@@ -38,6 +141,7 @@ class SqsLocalPlugin {
 
   getHooks() {
     return {
+      'before:offline:start:init': () => this.start(),
       "sqs:migrate:migrateHandler": this.migrateHandler.bind(this),
       "sqs:remove:removeHandler": this.removeHandler.bind(this)
     };

@@ -15,6 +15,18 @@ It allows you to create and remove queues defined in your serverless.yml in a lo
 
 The plugin will output the URLs to the queues. They typically have the form `<SQS_ENDPOINT>/queue/queue-name`.
 
+After creating queues, you can configure your lambdas to fire up in response to an SQS event:
+
+```
+functions:
+  myFire:
+    handler: handlers.fire
+    events:
+      sqs: arn:aws:sqs:eu-central-1:000000000:fireplace-processing-staging
+```
+
+Then, just run `sls offline start`, and it will listen at `SQS_ENDPOINT` for events to respective queues, firing lambdas as AWS would.
+
 I recommend using this plugin together with [serverless-sqs-client](https://github.com/Nevon/serverless-sqs-client) to transparently switch between AWS SQS and ElasticMQ depending on if you are running in offline mode or note.
 
 # Notes
