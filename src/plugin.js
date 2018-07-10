@@ -33,12 +33,13 @@ class SqsLocalPlugin {
   }
 
   subscribeAll () {
+    const getARN = (event) => typeof event.sqs === 'string' ? event.sqs : event.sqs.arn
     const fns = Object.keys(this.service.functions)
       .map(fnName => {
         const fn = this.service.functions[fnName]
         return fn.events
           .filter(event => event.sqs != null)
-          .map(event => ({ fn, event: event.sqs }))
+          .map(event => ({ fn, event: getARN(event) }))
       })
       .map(t => t[0])
       .filter(t => t)
