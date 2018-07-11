@@ -1,4 +1,5 @@
 const _ = require("lodash");
+const Consumer = require('sqs-consumer')
 const { resolve } = require('path')
 
 const SQS_ENDPOINT = process.env.SQS_ENDPOINT || "http://localhost:9324";
@@ -61,32 +62,27 @@ class SqsLocalPlugin {
 
   listenToQueue (url, cb) {
     this.log(`Setting listen @ ${url}`)
-    this.sqs.receiveMessage({
-      QueueUrl: url,
-      MessageAttributeNames: ['All'],
-      WaitTimeSeconds: 20 // long poll lol
-    }, (err, data) => {
-      if (err) return this.log(`Cannot receive messages from ${url}; ${err.toString()}`)
 
-      if (data.Messages) {
+    return Consumer.create({
+      queueUrl: url,
+      messageAttributeNames: ['All'],
+      handleMessage: (message, done) => {
         this.log(`Received message @ queue ${url}, spinning up respective lambda`)
+
         cb({
-          Records: data.Messages.map(this.wrapSQSMessage)
+          Records: [this.wrapSQSMessage(message)]
         },
         {},
         (err, data) => {
           if (err) {
-            return this.log(`Lambda terminated with error ${err.toString()}`)
+            done(err)
+            return this.log(`Lambda terminated with error: ${err.toString()}`)
           }
-          this.log(`Lambda returned data ${data.toString()}`)
-        }
-      )
-      } else {
-        this.log(`There are no new messages @ queue ${url}`)
+          this.log(`Lambda returned data: ${data.toString()}`)
+          done()
+        })
       }
-
-      this.listenToQueue(url, cb)
-    })
+    }).start()
   }
 
   wrapSQSMessage (rawMessage) {

@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "aws-sdk": "^2.85.0",
-    "lodash": "^4.17.4"
+    "lodash": "^4.17.4",
+    "sqs-consumer": "^3.8.0"
   },
   "devDependencies": {
     "jest": "^20.0.4",
